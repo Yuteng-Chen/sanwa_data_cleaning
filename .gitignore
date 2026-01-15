@@ -1,0 +1,29 @@
+# 忽略大数据目录
+input_images/
+pipeline_output/
+Output_Results/
+shortmold/
+cslot/
+logs/
+miniconda3/
+ollama_models/
+__pycache__/
+
+# 忽略大文件后缀
+*.zip
+*.tgz
+*.sh
+*.log
+*.safetensors
+*.bin
+*.pth
+*.so
+*.so.*
+
+# 忽略大型二进制文件和目录
+**/bin/
+**/lib/
+**/ollama
+**/ollama_install/
+
+py313_env/

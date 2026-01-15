@@ -1,0 +1,10 @@
+opencv-python
+numpy
+pillow
+rapidocr-onnxruntime
+onnxruntime
+scipy
+pandas
+ollama
+watchdog
+
