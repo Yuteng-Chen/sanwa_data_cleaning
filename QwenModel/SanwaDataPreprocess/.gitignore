@@ -1,0 +1,50 @@
+# Virtual environments
+.venv*/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# macOS
+.DS_Store
+._*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Archives
+*.zip
+
+# Output directories
+pipeline_output/
+Output_Results/
+Processed_History/
+Error_Images/
+Input_Images/
+Cleaned_Results_Output/
+Final_AI_Corrected_Logs/
+
+# OCR output directories (Stage 0)
+ocr_output_*/
+debug_crops/
+**/debug_crops/
+
+# Preprocess results
+Preprocess_Result*/
+
+# Large data files
+*.csv
+*.bmp
+*.png
+*.jpg
+*.jpeg
+
+# Keep specific files
+!roi.json
+!requirements.txt
