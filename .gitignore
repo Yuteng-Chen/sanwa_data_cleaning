@@ -1,0 +1,13 @@
+miniconda3/
+ollama_models/
+cslot/
+__pycache__/
+*.pyc
+.DS_Store
+logs/
+Output_Results/
+pipeline_output/
+py313_env/
+*.log
+Miniconda3*.sh
+shortmold/
