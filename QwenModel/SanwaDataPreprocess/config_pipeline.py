@@ -1,6 +1,7 @@
 """
 数据处理管道的统一配置文件
 Unified Configuration for Data Processing Pipeline
+针对 2025-12-22 批次定制 (修复路径匹配)
 """
 from pathlib import Path
 
@@ -8,62 +9,55 @@ from pathlib import Path
 # 项目根目录 / Project Root Directory
 PROJECT_ROOT = Path("/scratch/prj0000000262/ocr_data/QwenModel/SanwaDataPreprocess")
 
-# 服务器根目录 / Server Root Directory
-# 使用项目根目录作为服务器根目录
+# 服务器根目录
 SERVER_ROOT = PROJECT_ROOT
 
-# 输入数据路径 / Input Data Paths
-CSV_INPUT_DIR = PROJECT_ROOT / "input_images/2025-12-19cslot"
-DEBUG_CROPS_INPUT = PROJECT_ROOT / "debug_crops"
+# --- 关键修改：定义批次变量 (完全匹配你的路径) ---
+BATCH_NAME = "12_17_2025cslot/2025-12-17"     # 对应 CSV 文件夹
+CROP_DIR_NAME = "12_17_2025cslot/2025-12-17"  # 对应 debug_crops 文件夹
 
-# 输入输出目录 / Input/Output Directories
-SOURCE_DIR = PROJECT_ROOT / "input_images/2025-12-19cslot"  # 原始图像输入（Stage 0使用）   # 原始图像输入（Stage 0使用）
-
-# ⚠️ 修改此变量可更改所有输出目录的根路径
-# Change this variable to redirect all output to a new folder
+# 输出根目录
 PREPROCESS_ROOT = PROJECT_ROOT / "pipeline_output"
 OUTPUT_BASE = PREPROCESS_ROOT 
+
+# 输入数据路径 / Input Data Paths
+# 1. CSV 输入：指向你提供的 stage1_ocr_results/2025-12-22
+CSV_INPUT_DIR = OUTPUT_BASE / "stage1_ocr_results" / BATCH_NAME
+
+# 2. 截图输入：指向共享的 debug_crops 目录下对应批次
+DEBUG_CROPS_INPUT = OUTPUT_BASE / "stage1_ocr_results" / "debug_crops" / CROP_DIR_NAME
+
+# 原始图像输入（Stage 0使用，保持对应日期）
+SOURCE_DIR = PROJECT_ROOT / "input_images" / "12_18_2025" / "2025-12-18"
+
 # 各阶段输出目录 / Stage Output Directories
-# Stage 1: 模拟的OCR输出结构（使用现有数据）/ Simulated OCR output structure (using existing data)
-STAGE_1_OCR = OUTPUT_BASE / "stage1_ocr_results/2025-12-19cslot"
-STAGE_2_CLEANED = OUTPUT_BASE / "stage2_cleaned_data"
-STAGE_3_3B_CORRECTED = OUTPUT_BASE / "stage3_3b_corrected"
-STAGE_4_LABELED = OUTPUT_BASE / "stage4_labeled"
-STAGE_5_7B_VERIFIED = OUTPUT_BASE / "stage5_7b_verified"
-STAGE_6_FINAL = OUTPUT_BASE / "stage6_final_dataset"
+# 统一加上 BATCH_NAME 后缀，防止文件混淆
+STAGE_1_OCR = OUTPUT_BASE / "stage1_ocr_results" / BATCH_NAME
+STAGE_2_CLEANED = OUTPUT_BASE / "stage2_cleaned_data" / BATCH_NAME
+STAGE_3_3B_CORRECTED = OUTPUT_BASE / "stage3_3b_corrected" / BATCH_NAME
+STAGE_4_LABELED = OUTPUT_BASE / "stage4_labeled" / BATCH_NAME
+STAGE_5_7B_VERIFIED = OUTPUT_BASE / "stage5_7b_verified" / BATCH_NAME
+STAGE_6_FINAL = OUTPUT_BASE / "stage6_final_dataset" / BATCH_NAME
 
-# 调试和检查目录 / Debug and Review Directories
-DEBUG_CROPS_BASE = OUTPUT_BASE / "stage1_ocr_results/debug_crops/2025-12-19cslot"
-ABNORMAL_CROPS_BASE = OUTPUT_BASE / "abnormal_crops_review"
-REDUNDANCY_CROPS_BASE = OUTPUT_BASE / "redundancy_crops_review"
+# 调试和检查目录
+# 关键：DEBUG_CROPS_BASE 必须指向存在的截图目录，否则会报 Image Not Found
+DEBUG_CROPS_BASE = DEBUG_CROPS_INPUT  # 直接复用上面定义好的路径
+ABNORMAL_CROPS_BASE = OUTPUT_BASE / "abnormal_crops_review" / BATCH_NAME
+REDUNDANCY_CROPS_BASE = OUTPUT_BASE / "redundancy_crops_review" / BATCH_NAME
 
-# 人工检查目录 / Manual Check Directories
-MANUAL_CHECK_BASE_Abnormal = OUTPUT_BASE / "Abnormal"
-MANUAL_CHECK_BASE_Mismatch = OUTPUT_BASE / "Mismatch"
+# 人工检查目录
+MANUAL_CHECK_BASE_Abnormal = OUTPUT_BASE / "Abnormal" / BATCH_NAME
+MANUAL_CHECK_BASE_Mismatch = OUTPUT_BASE / "Mismatch" / BATCH_NAME
 
 # ================= 模型配置 / Model Configuration =================
+# 这里的名称必须与 `ollama list` 显示的完全一致 (qwen2.5vl 无横杠)
 OLLAMA_MODEL_3B = "qwen2.5vl:3b"
 OLLAMA_MODEL_7B = "qwen2.5vl:7b"
 
 # GPU并行处理配置 / GPU Parallel Processing
-# 配置说明：您有 4x V100 GPUs (32GB each)
-# 
-# V100性能参考：
-# - 3B模型：~2-3GB显存/实例，每块GPU可同时运行8-10个实例
-# - 7B模型：~6-8GB显存/实例，每块GPU可同时运行3-4个实例
-#
-# 推荐配置（4块V100）：
-MAX_WORKERS_3B = 64  # 4 GPUs * 4 workers = 16 (保守配置)
-                     # 可以尝试 20-24 如果显存充足
-MAX_WORKERS_7B = 32   # 4 GPUs * 2 workers = 8 (保守配置)
-                     # 可以尝试 12 如果显存充足
-
-# 性能调优建议：
-# - 监控GPU使用率：nvidia-smi -l 1
-# - 如果GPU利用率 < 80%，可以增加workers
-# - 如果出现OOM错误，减少workers
-# - 3B模型处理速度快，可以设置更多workers
-# - 7B模型显存需求大，workers数量要保守
+# 针对 8x H200 (140GB) 的强力配置
+MAX_WORKERS_3B = 64  # 3B模型极快，且显存足够，拉高并发
+MAX_WORKERS_7B = 32   # 7B模型并发
 
 # ================= ROI配置 / ROI Configuration =================
 ROI_JSON = Path("roi.json")
@@ -137,28 +131,20 @@ for cfg in ROI_CONFIGS:
 
 # ================= 数据验证配置 / Data Validation Configuration =================
 MAX_DECIMALS = 3
-OUTLIER_THRESHOLD = 5.0       # Ratio-based: 检测 >5x 或 <0.2x median 的值 (缺少小数点)
-Z_SCORE_THRESHOLD = 3.0       # Z-Score: 检测偏离正常范围的值 (>3 标准差)
-                               # Z > 2.0: ~5% 异常 (95% 置信区间)
-                               # Z > 2.5: ~1.2% 异常 
-                               # Z > 3.0: ~0.3% 异常 (99.7% 置信区间) [推荐]
-                               # Z > 3.5: ~0.05% 异常 (更保守)
+OUTLIER_THRESHOLD = 5.0
+Z_SCORE_THRESHOLD = 3.0
 FROZEN_THRESHOLD_SECONDS = 10.0
 
-# 自适应阈值配置（针对不同数据集）/ Adaptive Threshold Configuration
+# 自适应阈值配置
 SIMILARITY_THRESHOLDS = {
-    "CslotCam4result.csv": 0.85,          # C-slot较敏感
-    "cam 6 snap1 Latchresult.csv": 0.80,  # Latch默认
-    "cam 6 snap2 nozzleresult.csv": 0.95, # Nozzle默认
-    "terminal result.csv": 0.90           # Terminal数据点多，阈值更高
+    "CslotCam4result.csv": 0.85,
+    "cam 6 snap1 Latchresult.csv": 0.80,
+    "cam 6 snap2 nozzleresult.csv": 0.95,
+    "terminal result.csv": 0.90
 }
-
-# 默认相似度阈值 / Default Similarity Threshold
 DEFAULT_SIMILARITY_THRESHOLD = 0.80
 
 # ================= Prompt模板 / Prompt Templates =================
-
-# 通用噪声过滤规则（应用于所有prompt）
 NOISE_FILTER_RULES = """
 ⚠️ NOISE FILTERING RULES (CRITICAL):
 1. IGNORE half-cut numbers at edges (only partial digits visible)
@@ -174,23 +160,6 @@ NOISE_FILTER_RULES = """
 - HTML tags: <br>, <p>, <div>, <span>, etc.
 - Markdown: **, __, ```, #, etc.
 - Output ONLY: the raw number, 'OK', 'NG', or timestamp (HH:MM:SS)
-"""
-
-# 数字格式验证规则（应用于FLOAT和INTEGER）
-NUMBER_VALIDATION_RULES = """
-🔢 NUMBER FORMAT VALIDATION (MUST CHECK):
-1. ONLY ONE decimal point allowed (e.g., '5.7.726' is INVALID → probably '5.726')
-2. Maximum 3 digits after decimal point (e.g., '1.8888' → truncate to '1.888')
-3. Watch for REPEAT PATTERNS that indicate OCR errors:
-   - '5.7.726' → likely should be '5.726' (duplicate pattern)
-   - '1.881.88' → likely should be '1.88' (repeated number)
-   - '9.1289.128' → likely should be '9.128' (repeated number)
-4. If you see multiple decimal points → remove duplicates, keep FIRST valid pattern
-5. If the number seems 5x or more different from reference:
-   - STOP and look MORE carefully at the image
-   - Check for missing/extra decimal points
-   - Check for digit repetition errors
-   - Report what you ACTUALLY see after careful review
 """
 
 PROMPTS = {
@@ -321,8 +290,41 @@ PROMPTS = {
     }
 }
 
+# ================= Mismatch验证专用Prompt / Mismatch Verification Prompts =================
+MISMATCH_PROMPTS = {
+    'STATUS': (
+        "Task: Verify status value from TWO consecutive images.\n"
+        "Context: Previous frame shows '{compared_value}', current OCR reads '{current_value}'.\n"
+        "📋 OUTPUT FORMAT: Exactly 'OK' or 'NG'\n"
+        "Compare both images and determine the CORRECT status for the SECOND image.\n"
+        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <|im_end|>, HTML, markdown"
+    ),
+    'INTEGER': (
+        "Task: Verify integer value by comparing TWO consecutive images.\n"
+        "Context: Previous frame shows '{compared_value}', current OCR reads '{current_value}'.\n"
+        "Reference median: ~{median_context}\n"
+        "📋 OUTPUT FORMAT: Integer only (e.g., 95, 1911)\n"
+        "Compare both images. Output the CORRECT integer for the SECOND image.\n"
+        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <|im_end|>, HTML, markdown"
+    ),
+    'FLOAT': (
+        "Task: Verify decimal value by comparing TWO consecutive images.\n"
+        "Context: Previous frame shows '{compared_value}', current OCR reads '{current_value}'.\n"
+        "Reference median: ~{median_context}\n"
+        "📋 OUTPUT FORMAT: Decimal with max 3 places (e.g., 1.188, 16.069)\n"
+        "Compare both images. Output the CORRECT decimal for the SECOND image.\n"
+        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <|im_end|>, HTML, markdown"
+    ),
+    'TIME': (
+        "Task: Read the timestamp from this image.\n"
+        "Context: Previous was '{compared_value}', OCR read '{current_value}'.\n"
+        "📋 OUTPUT FORMAT: HH:MM:SS\n"
+        "Output ONLY the timestamp (HH:MM:SS). If blank → NA.\n"
+        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <|im_end|>, HTML, markdown"
+    )
+}
+
 # ================= 字段特定提示 / Field-Specific Prompts =================
-# 为每个具体ROI字段定义预期范围和格式
 FIELD_SPECIFIC_HINTS = {
     # CslotCam4result fields
     '1': {'type': 'STATUS', 'hint': 'C-Slot Status', 'format': 'OK or NG'},
@@ -362,44 +364,6 @@ FIELD_SPECIFIC_HINTS = {
     '52': {'type': 'TIME', 'hint': 'Time display', 'format': 'HH:MM:SS'},
 }
 
-# Mismatch Correction Prompts (7B Verification)
-MISMATCH_PROMPTS = {
-    'STATUS': (
-        "Task: Read the text in this image strictly.\n"
-        "Options: Usually 'OK' or 'NG'.\n"
-        "Context: The previous row was '{compared_value}', but OCR read '{current_value}'.\n"
-        "Output ONLY the text visible in the image.\n"
-        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <>, HTML, markdown"
-    ),
-    'INTEGER': (
-        "Task: Extract the INTEGER from this image.\n"
-        "Context: Previous was '{compared_value}'. Current OCR says '{current_value}'.\n"
-        "STRICT RULES:\n"
-        "1. Output ONLY the integer number (no decimal point).\n"
-        "2. If empty or black, output '0'.\n"
-        "3. NO special tokens, NO HTML, NO <|...|> tags.\n"
-        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <>, HTML, markdown"
-    ),
-    'FLOAT': (
-        "Task: Extract the DECIMAL NUMBER from this image.\n"
-        "Context: Previous was '{compared_value}'. Current OCR says '{current_value}'.\n"
-        "⚠️ CRITICAL FORMAT RULES:\n"
-        "1. Output ONLY ONE number with ONLY ONE decimal point.\n"
-        "2. MAXIMUM 3 digits after decimal (e.g., 9.128 not 9.12845).\n"
-        "3. If you see '9.1289.128' → output '9.128' (remove duplicate).\n"
-        "4. If you see '1.7.7988' → output '1.798' (fix multiple decimals).\n"
-        "5. If empty or black, output '0'.\n"
-        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <>, HTML, markdown\n"
-        "Output format: X.XXX (e.g., 1.823, 9.128, 0.001)"
-    ),
-    'TIME': (
-        "Task: Read the timestamp from this image.\n"
-        "Context: Previous was '{compared_value}'. Current OCR says '{current_value}'.\n"
-        "Output ONLY the timestamp (HH:MM:SS).\n"
-        "🚫 FORBIDDEN: <|im_start|>, <|endoftext|>, <>, HTML, markdown"
-    )
-}
-
 # ================= 日志配置 / Logging Configuration =================
 LOG_LEVEL = "INFO"
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
@@ -412,28 +376,19 @@ def get_similarity_threshold(csv_name: str) -> float:
     return DEFAULT_SIMILARITY_THRESHOLD
 
 def get_roi_type(roi_id: str) -> str:
-    """获取ROI的数据类型（增强版：自动匹配 ROI_ 前缀）"""
-    # 1. 尝试直接查找（例如 key是 "ROI_12"）
+    """获取ROI的数据类型"""
     if roi_id in ROI_TYPE_MAP:
         return ROI_TYPE_MAP[roi_id]
-    
-    # 2. 尝试加上前缀查找（例如传入 "12" -> 查找 "ROI_12"）
     if f"ROI_{roi_id}" in ROI_TYPE_MAP:
         return ROI_TYPE_MAP[f"ROI_{roi_id}"]
-        
-    # 3. 尝试去掉前缀查找（例如传入 "ROI_12" -> 查找 "12"）
     clean_id = str(roi_id).replace("ROI_", "")
     if clean_id in ROI_TYPE_MAP:
         return ROI_TYPE_MAP[clean_id]
-
-    # 4. 实在找不到，才默认是 STATUS
     return 'STATUS'
 
 def get_field_hint(roi_id: str) -> str:
     """获取字段特定的提示信息"""
-    # 清理ROI_前缀
     clean_id = str(roi_id).replace('ROI_', '')
-    
     if clean_id in FIELD_SPECIFIC_HINTS:
         hint = FIELD_SPECIFIC_HINTS[clean_id]
         parts = [f"Field: ROI_{clean_id} ({hint.get('hint', 'Unknown')})"]
@@ -448,30 +403,15 @@ def get_prompt(roi_id: str, prompt_type: str = 'initial',
                ocr_value: str = '', median_value: float = None,
                compared_value: str = '', current_value: str = '',
                prev_filename: str = '', curr_filename: str = '') -> str:
-    """
-    根据ROI类型和上下文生成prompt
-    
-    Args:
-        roi_id: ROI标识符（如 'ROI_13' 或 '13'）
-        prompt_type: 'initial', 'correction', 或 'mismatch'
-        ocr_value: 之前的OCR结果（用于correction）
-        median_value: 该ROI的中位数值（仅作为参考，不是目标值）
-        compared_value: 比较值（用于mismatch）
-        current_value: 当前值（用于mismatch）
-        prev_filename: 前一张图像文件名（用于mismatch dual comparison）
-        curr_filename: 当前图像文件名（用于mismatch dual comparison）
-    """
-    # 清理ROI_前缀
+    """根据ROI类型和上下文生成prompt"""
     clean_id = str(roi_id).replace('ROI_', '')
     roi_type = get_roi_type(clean_id)
     
-    # 选择prompt模板
     if prompt_type == 'mismatch':
         template = MISMATCH_PROMPTS.get(roi_type, MISMATCH_PROMPTS['STATUS'])
     else:
         template = PROMPTS.get(roi_type, {}).get(prompt_type, PROMPTS['STATUS']['initial'])
     
-    # 格式化median上下文 - 强调这只是参考值，不是目标值
     median_context = "N/A"
     if median_value is not None:
         if roi_type == 'STATUS':
@@ -483,10 +423,8 @@ def get_prompt(roi_id: str, prompt_type: str = 'initial',
         elif roi_type == 'TIME':
             median_context = "(varies)"
     
-    # 获取字段特定提示
     field_hint = get_field_hint(roi_id)
     
-    # 替换所有占位符
     prompt = template.replace('{ocr_value}', str(ocr_value))
     prompt = prompt.replace('{median_context}', str(median_context))
     prompt = prompt.replace('{compared_value}', str(compared_value))
@@ -495,7 +433,6 @@ def get_prompt(roi_id: str, prompt_type: str = 'initial',
     prompt = prompt.replace('{curr_filename}', str(curr_filename))
     prompt = prompt.replace('{roi_id}', clean_id)
     
-    # 添加字段特定提示（如果有）
     if field_hint:
         prompt = f"📌 {field_hint}\n\n{prompt}"
     
@@ -507,18 +444,16 @@ def create_directories():
         SOURCE_DIR, OUTPUT_BASE, STAGE_1_OCR, STAGE_2_CLEANED,
         STAGE_3_3B_CORRECTED, STAGE_4_LABELED, STAGE_5_7B_VERIFIED,
         STAGE_6_FINAL, DEBUG_CROPS_BASE, ABNORMAL_CROPS_BASE,
-        REDUNDANCY_CROPS_BASE
+        REDUNDANCY_CROPS_BASE, MANUAL_CHECK_BASE_Abnormal, MANUAL_CHECK_BASE_Mismatch
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
-    print("✅ All directories created successfully")
+    print(f"✅ Directories for batch {BATCH_NAME} created successfully")
 
 if __name__ == "__main__":
     print("Configuration loaded successfully")
     print(f"Server Root: {SERVER_ROOT}")
-    print(f"OCR Model 3B: {OLLAMA_MODEL_3B}")
-    print(f"OCR Model 7B: {OLLAMA_MODEL_7B}")
+    print(f"Target Batch: {BATCH_NAME}")
+    print(f"Crop Source: {CROP_DIR_NAME}")
     print(f"\nROI Type Map: {len(ROI_TYPE_MAP)} ROIs configured")
-    print(f"CSV Groups: {len(CSV_GROUPS)} groups configured")
     create_directories()
-

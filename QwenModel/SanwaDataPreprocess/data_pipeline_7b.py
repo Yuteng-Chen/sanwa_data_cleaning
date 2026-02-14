@@ -111,7 +111,7 @@ class Stage4_DataLabeling:
     def process_single_csv(self, csv_path):
         """处理单个CSV并标记"""
         filename = csv_path.name
-        base_name = csv_path.stem.replace("_3B_Corrected", "")
+        base_name = csv_path.stem.replace("_Final", "")
         
         # 获取自适应阈值
         similarity_threshold = get_similarity_threshold(filename)
@@ -252,7 +252,7 @@ class Stage4_DataLabeling:
         print("STAGE 4: Data Labeling (Time/Redundancy Analysis)")
         print("="*60)
         
-        csv_files = list(self.input_dir.glob("*_3B_Corrected.csv"))
+        csv_files = list(self.input_dir.glob("*_Final.csv"))
         
         if not csv_files:
             print("❌ No 3B corrected files found")
@@ -329,11 +329,12 @@ class Stage5_7BVerification:
         )
     
     def clean_model_output(self, text, roi_type='FLOAT'):
-        """保留模型原始输出，只移除模型内部控制tokens"""
+        """清理模型输出，根据ROI类型提取正确的值"""
         if not text:
             return "ERROR"
         
         import re
+        # 移除特殊tokens
         special_tokens = [
             r'<\|im_start\|>', r'<\|im_end\|>', r'<\|endoftext\|>',
             r'<\|pad\|>', r'<\|assistant\|>', r'<\|user\|>', r'<\|system\|>',
@@ -343,9 +344,31 @@ class Stage5_7BVerification:
         
         text = text.strip()
         text = text.split('\n')[0].strip()
-        text = text.split()[0] if text.split() else text
         
-        return text if text else "ERROR"
+        # 根据类型提取值
+        if roi_type in ['FLOAT', 'INTEGER']:
+            # 提取数字（包括负数和小数）
+            match = re.search(r'-?\d+\.?\d*', text)
+            if match:
+                return match.group()
+            return "ERROR"
+        elif roi_type == 'STATUS':
+            # 提取 OK 或 NG
+            text_upper = text.upper()
+            if 'OK' in text_upper:
+                return 'OK'
+            elif 'NG' in text_upper:
+                return 'NG'
+            return text.split()[0] if text.split() else "ERROR"
+        elif roi_type == 'TIME':
+            # 提取时间格式 HH:MM:SS
+            match = re.search(r'\d{1,2}:\d{2}:\d{2}', text)
+            if match:
+                return match.group()
+            return text.split()[0] if text.split() else "ERROR"
+        else:
+            # 默认取第一个单词
+            return text.split()[0] if text.split() else "ERROR"
     
     def run_7b_inference_dual(self, image_path_prev, image_path_curr, prompt, roi_type='FLOAT'):
         """
@@ -570,7 +593,7 @@ class Stage6_FinalConsolidation:
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def clean_model_output(self, text, roi_type='FLOAT'):
-        """保留模型原始输出，只移除模型内部控制tokens"""
+        """清理模型输出，根据ROI类型提取正确的值"""
         if not text: return "ERROR"
         import re
         special_tokens = [
@@ -580,8 +603,27 @@ class Stage6_FinalConsolidation:
         for token in special_tokens:
             text = re.sub(token, '', text)
         text = text.strip().split('\n')[0].strip()
-        text = text.split()[0] if text.split() else text
-        return text if text else "ERROR"
+        
+        # 根据类型提取值
+        if roi_type in ['FLOAT', 'INTEGER']:
+            match = re.search(r'-?\d+\.?\d*', text)
+            if match:
+                return match.group()
+            return "ERROR"
+        elif roi_type == 'STATUS':
+            text_upper = text.upper()
+            if 'OK' in text_upper:
+                return 'OK'
+            elif 'NG' in text_upper:
+                return 'NG'
+            return text.split()[0] if text.split() else "ERROR"
+        elif roi_type == 'TIME':
+            match = re.search(r'\d{1,2}:\d{2}:\d{2}', text)
+            if match:
+                return match.group()
+            return text.split()[0] if text.split() else "ERROR"
+        else:
+            return text.split()[0] if text.split() else "ERROR"
 
     def run_7b_inference(self, image_path, prompt, roi_type='FLOAT'):
         """
@@ -718,7 +760,7 @@ class Stage6_FinalConsolidation:
         return df
     
     def apply_7b_corrections(self, labeled_csv_path, verified_log_path):
-        """应用7B修正"""
+        """应用7B修正（根据 Verdict 决定更新策略）"""
         print(f"\n🔧 Applying 7B corrections: {labeled_csv_path.name}")
         try:
             df_main = pd.read_csv(labeled_csv_path)
@@ -733,31 +775,51 @@ class Stage6_FinalConsolidation:
         corrections = []
         for _, row in df_log.iterrows():
             ai_val = str(row.get('AI_7B_Read', '')).strip()
+            verdict = str(row.get('Verdict', '')).strip()
+            
             if ai_val in ["", "nan", "Image Not Found", "ERROR"]: continue
             corrections.append({
                 'curr': row['Filename_Current'],
                 'comp': row['Filename_Compared'],
                 'roi': row['ROI_ID'],
-                'val': ai_val
+                'val': ai_val,
+                'verdict': verdict
             })
         
         patch_count = 0
+        skip_count = 0
+        
         for item in corrections:
             target_roi = item['roi']
             new_val = item['val']
+            verdict = item['verdict']
+            
             if target_roi not in df_main.columns: continue
             
-            mask_curr = df_main['Filename'] == item['curr']
-            if mask_curr.any():
-                df_main.loc[mask_curr, target_roi] = new_val
-                patch_count += 1
-            
-            mask_comp = df_main['Filename'] == item['comp']
-            if mask_comp.any():
-                df_main.loc[mask_comp, target_roi] = new_val
-                patch_count += 1
+            # 根据 Verdict 决定更新策略
+            if "Genuine Change" in verdict:
+                # curr 是正确的（真实变化），不需要更新任何行
+                skip_count += 1
+                continue
+            elif "Confirmed Redundant" in verdict:
+                # prev 正确，curr 是 OCR 错误，只更新 curr 行
+                mask_curr = df_main['Filename'] == item['curr']
+                if mask_curr.any():
+                    df_main.loc[mask_curr, target_roi] = new_val
+                    patch_count += 1
+            else:
+                # "New Value" 或其他情况，更新两行
+                mask_curr = df_main['Filename'] == item['curr']
+                if mask_curr.any():
+                    df_main.loc[mask_curr, target_roi] = new_val
+                    patch_count += 1
+                
+                mask_comp = df_main['Filename'] == item['comp']
+                if mask_comp.any():
+                    df_main.loc[mask_comp, target_roi] = new_val
+                    patch_count += 1
         
-        print(f"  ✅ Patched {patch_count} cells")
+        print(f"  ✅ Patched {patch_count} cells (Skipped {skip_count} genuine changes)")
         return df_main
     
     def parse_pc_filename_time(self, filename):
@@ -770,18 +832,36 @@ class Stage6_FinalConsolidation:
         return None
     
     def get_data_columns(self, row, all_columns):
-        data_cols = all_columns[6:] if len(all_columns) > 6 else all_columns
-        exclude = ['Time_Status', 'Data_Redundancy', 'Matched_File', 'Duration_Since_Change', 'Real_Freeze_Duration_Sec']
-        data_cols = [c for c in data_cols if c not in exclude and not c.startswith('ROI_5')]
-        return [str(row.get(c, '')).strip() for c in data_cols]
+        """获取用于比较的数据列（与 Stage 4 逻辑一致）"""
+        # 与 Stage4_DataLabeling.get_positional_data 保持一致
+        start_idx = 4
+        if 'ROI_51' in all_columns:
+            end_idx = all_columns.index('ROI_51')
+        elif 'ROI_52' in all_columns:
+            end_idx = all_columns.index('ROI_52')
+        else:
+            end_idx = len(all_columns)
+        
+        if start_idx >= end_idx:
+            return []
+        
+        cols_to_check = all_columns[start_idx:end_idx]
+        
+        # 排除 Stage 4 添加的标记列（这些列在 Stage 4 之后才存在）
+        exclude = ['Time_Status', 'Data_Redundancy', 'Matched_File', 
+                   'Duration_Since_Change', 'Real_Freeze_Duration_Sec',
+                   'Redundancy_Action', 'Redundancy_Group_ID', 'Redundancy_Reason']
+        cols_to_check = [c for c in cols_to_check if c not in exclude]
+        
+        return [str(row.get(c, '')).strip() for c in cols_to_check]
     
     def values_are_same(self, vals1, vals2):
         if len(vals1) != len(vals2): return False
         return vals1 == vals2
     
     def consolidate_redundancy(self, df):
-        """消除冗余行"""
-        print(f"  🗜️  Consolidating redundancy (enhanced)...")
+        """标记冗余行（不删除，仅添加标记列）"""
+        print(f"  🏷️  Labeling redundancy (mark mode)...")
         df.sort_values(by='Filename', inplace=True)
         df.reset_index(drop=True, inplace=True)
         rows = df.to_dict('records')
@@ -794,8 +874,14 @@ class Stage6_FinalConsolidation:
             row_times.append(self.parse_pc_filename_time(row.get('Filename', '')))
             row_data_vals.append(self.get_data_columns(row, all_columns))
         
-        kept_indices = []
-        deletion_log = []
+        # 初始化标记列
+        for row in rows:
+            row['Redundancy_Action'] = 'Keep'
+            row['Redundancy_Group_ID'] = 0
+            row['Redundancy_Reason'] = ''
+        
+        group_id = 0
+        redundant_count = 0
         
         i = 0
         while i < total_rows:
@@ -804,10 +890,11 @@ class Stage6_FinalConsolidation:
             curr_vals = row_data_vals[i]
             curr_roi52 = str(curr_row.get('ROI_52', '')).strip()
             
-            kept_indices.append(i)
+            group_id += 1
+            curr_row['Redundancy_Group_ID'] = group_id
+            curr_row['Redundancy_Action'] = 'Keep'
             
             j = i + 1
-            redundant_group = [i]
             
             while j < total_rows:
                 next_row = rows[j]
@@ -828,41 +915,53 @@ class Stage6_FinalConsolidation:
                 
                 if time_gap >= 9: break
                 
-                should_merge = False
-                if is_frozen and same_machine_time and same_values: should_merge = True
-                if is_redundant and same_values and time_gap < 9: should_merge = True
-                if same_machine_time and same_values and time_gap < 9: should_merge = True
+                should_mark_redundant = False
+                reason_parts = []
                 
-                if should_merge:
-                    redundant_group.append(j)
-                    deletion_log.append({
-                        'Deleted_Filename': next_row['Filename'],
-                        'Reason': f"Redundancy Merge (Gap: {time_gap:.1f}s)",
-                        'Time_Gap_Sec': time_gap
-                    })
+                if is_frozen and same_machine_time and same_values:
+                    should_mark_redundant = True
+                    reason_parts.append("Time Frozen")
+                if is_redundant and same_values and time_gap < 9:
+                    should_mark_redundant = True
+                    reason_parts.append("Data Redundant")
+                if same_machine_time and same_values and time_gap < 9:
+                    should_mark_redundant = True
+                    if "Same Machine Time" not in reason_parts:
+                        reason_parts.append("Same Machine Time")
+                
+                if should_mark_redundant:
+                    next_row['Redundancy_Action'] = 'Redundant'
+                    next_row['Redundancy_Group_ID'] = group_id
+                    next_row['Redundancy_Reason'] = f"{' + '.join(reason_parts)} (Gap: {time_gap:.1f}s)"
+                    redundant_count += 1
                     j += 1
-                else: break
+                else:
+                    break
             
             i = j
         
-        kept_indices = sorted(set(kept_indices))
-        kept_rows = [rows[idx] for idx in kept_indices]
-        
-        for k in range(len(kept_rows)):
-            curr_item = kept_rows[k]
+        # 计算 Keep 行之间的时间间隔
+        keep_rows = [r for r in rows if r['Redundancy_Action'] == 'Keep']
+        for k in range(len(keep_rows)):
+            curr_item = keep_rows[k]
             curr_time = self.parse_pc_filename_time(curr_item['Filename'])
             step_duration = 0.0
             if k > 0:
-                prev_item = kept_rows[k-1]
+                prev_item = keep_rows[k-1]
                 prev_time = self.parse_pc_filename_time(prev_item['Filename'])
                 if curr_time and prev_time:
                     step_duration = (curr_time - prev_time).total_seconds()
             curr_item['Real_Freeze_Duration_Sec'] = round(step_duration, 2)
         
-        df_final = pd.DataFrame(kept_rows)
-        removed_count = total_rows - len(df_final)
-        print(f"  ✅ Compression: {total_rows} → {len(df_final)} rows (Removed {removed_count})")
-        return df_final, deletion_log
+        # Redundant 行的 Real_Freeze_Duration_Sec 设为 0
+        for row in rows:
+            if row['Redundancy_Action'] == 'Redundant':
+                row['Real_Freeze_Duration_Sec'] = 0.0
+        
+        df_final = pd.DataFrame(rows)
+        keep_count = total_rows - redundant_count
+        print(f"  ✅ Labeling complete: {total_rows} rows total (Keep: {keep_count}, Redundant: {redundant_count})")
+        return df_final, redundant_count
     
     def process_single_file(self, labeled_csv_path):
         """处理单个文件"""
@@ -883,21 +982,17 @@ class Stage6_FinalConsolidation:
         # 格式验证和修复
         df_corrected = self.fix_format_issues_with_7b(df_corrected, base_name)
         
-        # 消除冗余
-        df_final, deletion_log = self.consolidate_redundancy(df_corrected)
+        # 标记冗余（不删除，仅添加标记列）
+        df_final, redundant_count = self.consolidate_redundancy(df_corrected)
         
         out_name = f"{base_name}_Final.csv"
         df_final.to_csv(self.output_dir / out_name, index=False)
-        print(f"  💾 Saved: {out_name}")
-        
-        if deletion_log:
-            log_name = f"{base_name}_Deletion_Log.csv"
-            pd.DataFrame(deletion_log).to_csv(self.output_dir / log_name, index=False)
+        print(f"  💾 Saved: {out_name} (Redundant rows marked: {redundant_count})")
     
     def run(self):
         """运行最终整合流程"""
         print("\n" + "="*60)
-        print("STAGE 6: Final Consolidation (Apply 7B + Remove Redundancy)")
+        print("STAGE 6: Final Consolidation (Apply 7B + Mark Redundancy)")
         print("="*60)
         
         labeled_files = list(self.labeled_dir.glob("*_Labeled.csv"))
@@ -912,33 +1007,21 @@ class Stage6_FinalConsolidation:
 
 # ================= 主流程 =================
 def main():
-    """7B管道主流程 - 针对 2025-12-19cslot 批次"""
+    """7B管道主流程 - 使用 config_pipeline.py 中的配置"""
     
     # ================= 路径配置 (Path Configuration) =================
+    # 直接使用 config_pipeline.py 中的变量，避免路径重复
     
-    # 1. 批次名称 (用于输入和输出文件夹命名)
-    BATCH_NAME = "2025-12-19cslot"
+    # 输入目录：Stage 3 (3B修正后) 的结果
+    TARGET_INPUT_DIR = STAGE_3_3B_CORRECTED
     
-    # 2. 内部日期 (对应 Crops 文件夹里的日期层级)
-    INNER_DATE = ""
+    # 截图目录 (Crops) - 7B模型需要回头看原始截图进行验证
+    TARGET_CROPS_DIR = DEBUG_CROPS_BASE
     
-    # 3. 输入目录：Stage 3 (3B修正后) 的结果
-    # 路径: .../stage3_3b_corrected/2025-12-19cslot
-    BASE_INPUT_DIR = Path("/scratch/prj0000000262/ocr_data/QwenModel/SanwaDataPreprocess/pipeline_output/stage3_3b_corrected")
-    TARGET_INPUT_DIR = BASE_INPUT_DIR / BATCH_NAME
-    
-    # 4. 截图目录 (Crops) - 7B模型需要回头看原始截图进行验证
-    # 路径: .../debug_crops/2025-12-19cslot/2025-12-19
-    DEBUG_CROPS_ROOT = Path("/scratch/prj0000000262/ocr_data/QwenModel/SanwaDataPreprocess/pipeline_output/stage1_ocr_results/debug_crops")
-    TARGET_CROPS_DIR = DEBUG_CROPS_ROOT / BATCH_NAME / INNER_DATE
-    
-    # 5. 输出目录 - 自动带上 BATCH_NAME
-    # Stage 4 输出 -> .../stage4_labeled/2025-12-19cslot
-    DATED_STAGE_4_DIR = Path(STAGE_4_LABELED) / BATCH_NAME
-    # Stage 5 输出 -> .../stage5_7b_verified/2025-12-19cslot
-    DATED_STAGE_5_DIR = Path(STAGE_5_7B_VERIFIED) / BATCH_NAME
-    # Stage 6 输出 -> .../stage6_final/2025-12-19cslot
-    DATED_STAGE_6_DIR = Path(STAGE_6_FINAL) / BATCH_NAME
+    # 输出目录 - 直接使用 config 中已包含 BATCH_NAME 的路径
+    DATED_STAGE_4_DIR = STAGE_4_LABELED
+    DATED_STAGE_5_DIR = STAGE_5_7B_VERIFIED
+    DATED_STAGE_6_DIR = STAGE_6_FINAL
     
     # ==============================================================
 

@@ -33,10 +33,10 @@ from config_pipeline import *
 
 # ================= 🔴 核心路径配置 (保留你的设置) =================
 # 1. 强制指定输入图片的文件夹
-SOURCE_DIR = Path("/scratch/prj0000000262/ocr_data/QwenModel/SanwaDataPreprocess/input_images/12-22-2025/2025-12-22")
+SOURCE_DIR = Path("/scratch/prj0000000262/ocr_data/QwenModel/SanwaDataPreprocess/input_images/12_19_2025/12_19_2025")
 
-# 2. 定义批次名称 (输出到 debug_crops/12-22-2025)
-BATCH_NAME = "12-22-2025"
+# 2. 定义批次名称 (输出到 debug_crops/12-19-2025)
+BATCH_NAME = "12-19-2025"
 
 # 3. 确保项目根目录正确
 PROJECT_ROOT = Path("/scratch/prj0000000262/ocr_data/QwenModel/SanwaDataPreprocess")
@@ -171,7 +171,7 @@ class EnhancedGPUHandler(FileSystemEventHandler):
         image_folder_name = file_path.stem 
         
         # ================= 🔴 路径对齐 =================
-        # 基础路径: .../stage1_ocr_results/debug_crops/12-22-2025
+        # 基础路径: .../stage1_ocr_results/debug_crops/12-17-2025
         base_debug_path = STAGE_1_OCR / "debug_crops" / BATCH_NAME
         
         # 完整目标路径
@@ -377,7 +377,8 @@ class EnhancedGPUHandler(FileSystemEventHandler):
     
     def append_to_summary_csv(self, csv_name, id_list, results_dict, 
                              filename, file_utc, raw_mach, calc_mach, relative_parent):
-        target_folder = STAGE_1_OCR / relative_parent / "CSV_Results"
+        # CSV 输出到 BATCH_NAME/CSV_Results/ 目录
+        target_folder = STAGE_1_OCR / BATCH_NAME / "CSV_Results"
         target_folder.mkdir(parents=True, exist_ok=True)
         csv_path = target_folder / csv_name
         

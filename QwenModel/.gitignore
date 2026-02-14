@@ -1,0 +1,8 @@
+
+# Ollama installation and backups
+SanwaDataPreprocess/ollama-linux-amd64.tar.zst
+SanwaDataPreprocess/ollama_old/
+SanwaDataPreprocess/ollama_old/
+
+ollama_old
+ollama_old/
